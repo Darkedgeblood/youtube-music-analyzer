@@ -1,0 +1,93 @@
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
+
+const app = express();
+const PORT = 5000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// YouTube API Configuration
+const API_KEY = 'AIzaSyCBnit-kfRGJXCYt8yvX0oUipbgm75G2gc'; // Use your actual API key
+const BASE_URL = 'https://www.googleapis.com/youtube/v3';
+
+// Function to fetch video details
+const getVideoDetails = async (videoIds) => {
+    try {
+        const response = await axios.get(`${BASE_URL}/videos`, {
+            params: {
+                key: API_KEY,
+                part: 'statistics',
+                id: videoIds.join(','),
+            },
+        });
+
+        return response.data.items.reduce((acc, video) => {
+            acc[video.id] = {
+                viewCount: parseInt(video.statistics.viewCount, 10) || 0,
+            };
+            return acc;
+        }, {});
+    } catch (error) {
+        console.error('Error fetching video statistics:', error.message);
+        return {};
+    }
+};
+
+// API Route: Fetch top music videos for a given year
+app.get('/top-music-videos', async (req, res) => {
+    const { year } = req.query;
+
+    if (!year || isNaN(year)) {
+        return res.status(400).json({ error: 'Invalid or missing year parameter' });
+    }
+
+    try {
+        // Fetch music videos from YouTube
+        const response = await axios.get(`${BASE_URL}/search`, {
+            params: {
+                key: API_KEY,
+                part: 'snippet',
+                type: 'video',
+                q: 'music',
+                maxResults: 50,
+                order: 'relevance',
+                publishedAfter: `${year}-01-01T00:00:00Z`,
+                publishedBefore: `${year}-12-31T23:59:59Z`,
+            },
+        });
+
+        const videos = response.data.items;
+        if (!videos.length) {
+            return res.json({ message: 'No music videos found for this year.' });
+        }
+
+        // Get video IDs for fetching statistics
+        const videoIds = videos.map(video => video.id.videoId);
+        const videoStats = await getVideoDetails(videoIds);
+
+        // Process and sort videos by view count
+        const sortedVideos = videos
+            .map(video => ({
+                title: video.snippet.title,
+                channel: video.snippet.channelTitle,
+                publishedAt: video.snippet.publishedAt,
+                viewCount: videoStats[video.id.videoId]?.viewCount || 0,
+                videoId: video.id.videoId,
+            }))
+            .sort((a, b) => b.viewCount - a.viewCount)
+            .slice(0, 20);
+
+        res.json(sortedVideos);
+    } catch (error) {
+        console.error('Error fetching videos:', error.message);
+        res.status(500).json({ error: 'Failed to fetch videos' });
+    }
+});
+
+// Start Server
+app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+});
