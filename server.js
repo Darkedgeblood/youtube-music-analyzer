@@ -13,7 +13,7 @@ app.use(express.json());
 const API_KEY = 'AIzaSyCBnit-kfRGJXCYt8yvX0oUipbgm75G2gc'; // Use your actual API key
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
 
-// Function to fetch video details
+// Function to fetch video statistics (view count)
 const getVideoDetails = async (videoIds) => {
     try {
         const response = await axios.get(`${BASE_URL}/videos`, {
@@ -45,31 +45,52 @@ app.get('/top-music-videos', async (req, res) => {
     }
 
     try {
-        // Fetch music videos from YouTube
-        const response = await axios.get(`${BASE_URL}/search`, {
-            params: {
-                key: API_KEY,
-                part: 'snippet',
-                type: 'video',
-                q: 'music',
-                maxResults: 50,
-                order: 'relevance',
-                publishedAfter: `${year}-01-01T00:00:00Z`,
-                publishedBefore: `${year}-12-31T23:59:59Z`,
-            },
-        });
+        // Define multiple search queries for different languages
+        const queries = [
+            "music video", "song", "official video", "canción", "chanson", "música", 
+            "lagu", "künstler", "videoclip", "cancione", "clip musical"
+        ];
 
-        const videos = response.data.items;
-        if (!videos.length) {
-            return res.json({ message: 'No music videos found for this year.' });
+        let allVideos = [];
+        let maxPages = 3; // Fetch up to 150 videos
+        let pagesFetched = 0;
+
+        for (let query of queries) {
+            let nextPageToken = "";
+
+            while (pagesFetched < maxPages) {
+                const response = await axios.get(`${BASE_URL}/search`, {
+                    params: {
+                        part: "snippet",
+                        q: query,
+                        type: "video",
+                        maxResults: 50,
+                        videoCategoryId: 10,
+                        order: "viewCount",
+                        publishedAfter: `${year}-01-01T00:00:00Z`,
+                        publishedBefore: `${year}-12-31T23:59:59Z`,
+                        pageToken: nextPageToken,
+                        key: API_KEY,
+                    },
+                });
+
+                allVideos = [...allVideos, ...response.data.items];
+                nextPageToken = response.data.nextPageToken;
+                pagesFetched++;
+
+                if (!nextPageToken) break; // Stop if no more pages
+            }
         }
 
-        // Get video IDs for fetching statistics
-        const videoIds = videos.map(video => video.id.videoId);
+        // Remove duplicate videos
+        allVideos = Array.from(new Map(allVideos.map(v => [v.id.videoId, v])).values());
+
+        // Fetch detailed video statistics (view counts)
+        const videoIds = allVideos.map(video => video.id.videoId);
         const videoStats = await getVideoDetails(videoIds);
 
         // Process and sort videos by view count
-        const sortedVideos = videos
+        const sortedVideos = allVideos
             .map(video => ({
                 title: video.snippet.title,
                 channel: video.snippet.channelTitle,
