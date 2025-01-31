@@ -10,7 +10,7 @@ app.use(cors({
     origin: "*",
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type"]
-}));  
+}));
 app.use(express.json());
 
 // YouTube API Configuration
@@ -25,15 +25,15 @@ const getVideoDetails = async (videoIds) => {
         const response = await axios.get(`${BASE_URL}/videos`, {
             params: {
                 key: API_KEY,
-                part: 'statistics,snippet',
+                part: 'snippet,statistics',
                 id: videoIds.join(','),
             },
         });
 
         return response.data.items.reduce((acc, video) => {
             acc[video.id] = {
-                viewCount: parseInt(video.statistics.viewCount, 10) || 0,
-                publishedAt: video.snippet.publishedAt || "Unknown", // Ensure release date is always present
+                viewCount: video.statistics?.viewCount ? parseInt(video.statistics.viewCount, 10) : 0,
+                publishedAt: video.snippet?.publishedAt || "Unknown",
             };
             return acc;
         }, {});
@@ -54,7 +54,7 @@ app.get('/top-music-videos', async (req, res) => {
     try {
         // Define multiple search queries for different languages
         const queries = [
-            "music video", "song", "official video", "canción", "chanson", "música", 
+            "music video", "song", "official video", "canción", "chanson", "música",
             "lagu", "künstler", "videoclip", "cancione", "clip musical"
         ];
 
@@ -101,7 +101,7 @@ app.get('/top-music-videos', async (req, res) => {
             .map(video => ({
                 title: video.snippet.title,
                 channel: video.snippet.channelTitle,
-                publishedAt: videoStats[video.id.videoId]?.publishedAt || "Unknown", // Release Date
+                publishedAt: videoStats[video.id.videoId]?.publishedAt || "Unknown",
                 viewCount: videoStats[video.id.videoId]?.viewCount || 0,
                 videoId: video.id.videoId,
             }))
