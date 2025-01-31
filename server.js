@@ -10,20 +10,22 @@ app.use(cors({
     origin: "*",
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type"]
-  }));  
+}));  
 app.use(express.json());
 
 // YouTube API Configuration
 const API_KEY = 'AIzaSyCBnit-kfRGJXCYt8yvX0oUipbgm75G2gc'; // Use your actual API key
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
 
-// Function to fetch video statistics (view count)
+// Function to fetch video statistics (view count and release date)
 const getVideoDetails = async (videoIds) => {
+    if (!videoIds.length) return {};
+
     try {
         const response = await axios.get(`${BASE_URL}/videos`, {
             params: {
                 key: API_KEY,
-                part: 'statistics',
+                part: 'statistics,snippet',
                 id: videoIds.join(','),
             },
         });
@@ -31,6 +33,7 @@ const getVideoDetails = async (videoIds) => {
         return response.data.items.reduce((acc, video) => {
             acc[video.id] = {
                 viewCount: parseInt(video.statistics.viewCount, 10) || 0,
+                publishedAt: video.snippet.publishedAt || "Unknown", // Ensure release date is always present
             };
             return acc;
         }, {});
@@ -89,7 +92,7 @@ app.get('/top-music-videos', async (req, res) => {
         // Remove duplicate videos
         allVideos = Array.from(new Map(allVideos.map(v => [v.id.videoId, v])).values());
 
-        // Fetch detailed video statistics (view counts)
+        // Fetch detailed video statistics (view counts and release dates)
         const videoIds = allVideos.map(video => video.id.videoId);
         const videoStats = await getVideoDetails(videoIds);
 
@@ -98,7 +101,7 @@ app.get('/top-music-videos', async (req, res) => {
             .map(video => ({
                 title: video.snippet.title,
                 channel: video.snippet.channelTitle,
-                publishedAt: video.snippet.publishedAt,
+                publishedAt: videoStats[video.id.videoId]?.publishedAt || "Unknown", // Release Date
                 viewCount: videoStats[video.id.videoId]?.viewCount || 0,
                 videoId: video.id.videoId,
             }))
