@@ -77,7 +77,10 @@ async function getVideoDetails(videoIds) {
                 channel: video.snippet?.channelTitle || 'Unknown channel',
                 viewCount: parseInt(video.statistics?.viewCount || '0', 10),
                 publishedAt: video.snippet?.publishedAt || null,
+<<<<<<< HEAD
                 categoryId: video.snippet?.categoryId || null,
+=======
+>>>>>>> f452251099b44a48bab45473954177111e134802
             };
         }
     }
@@ -112,7 +115,11 @@ app.get('/top-music-videos', async (req, res) => {
 
         // Spread a few focused queries with a polite delay between calls to
         // stay under the per-second rate limit instead of hammering the API.
+<<<<<<< HEAD
         const PAGES_PER_QUERY = 3; // 50/page => up to 150 per query
+=======
+        const PAGES_PER_QUERY = 2; // 50/page => up to 100 per query
+>>>>>>> f452251099b44a48bab45473954177111e134802
         for (const query of SEARCH_QUERIES) {
             let pageToken = '';
             for (let page = 0; page < PAGES_PER_QUERY; page++) {
@@ -143,7 +150,11 @@ app.get('/top-music-videos', async (req, res) => {
             }
             await sleep(300);
             // Early exit: we already have far more than we need
+<<<<<<< HEAD
             if (candidates.length >= 400) break; // extra margin; year filter discards out-of-range hits
+=======
+            if (candidates.length >= TOP_N * 3) break;
+>>>>>>> f452251099b44a48bab45473954177111e134802
         }
 
         if (candidates.length === 0) {
@@ -152,9 +163,12 @@ app.get('/top-music-videos', async (req, res) => {
 
         const details = await getVideoDetails(candidates);
 
+<<<<<<< HEAD
         // YouTube's search date filter is LOOSE (documented quirk): when
         // ordering by viewCount it returns videos uploaded outside the
         // requested range. So we filter by the video's REAL upload date here.
+=======
+>>>>>>> f452251099b44a48bab45473954177111e134802
         const videos = Object.entries(details)
             .map(([videoId, v]) => ({
                 videoId,
