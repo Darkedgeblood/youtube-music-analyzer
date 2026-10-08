@@ -77,10 +77,7 @@ async function getVideoDetails(videoIds) {
                 channel: video.snippet?.channelTitle || 'Unknown channel',
                 viewCount: parseInt(video.statistics?.viewCount || '0', 10),
                 publishedAt: video.snippet?.publishedAt || null,
-<<<<<<< HEAD
                 categoryId: video.snippet?.categoryId || null,
-=======
->>>>>>> f452251099b44a48bab45473954177111e134802
             };
         }
     }
