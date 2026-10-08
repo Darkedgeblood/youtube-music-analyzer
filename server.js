@@ -8,16 +8,11 @@ const PORT = process.env.PORT || 5000;
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const API_KEY = process.env.YOUTUBE_API_KEY || 'AIzaSyCBnit-kfRGJXCYt8yvX0oUipbgm75G2gc';
+// NEVER hardcode your API key. Rely on Render's Environment Variables.
+const API_KEY = process.env.YOUTUBE_API_KEY; 
 const BASE_URL = 'https://www.googleapis.com/youtube/v3';
-const TOP_N = 50;                 // max results returned to the client
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour in-memory cache per year
-const SEARCH_QUERIES = [
-    'official music video',
-    'official video',
-    'song',
-    'lyric video',
-];
+const TOP_N = 50;                 
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // Cache for 24 hours to save quota
 
 // In-memory cache: { year: { data, timestamp } }
 const cache = {};
@@ -31,16 +26,9 @@ app.use(express.json());
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Axios instance with sane timeout so requests never hang forever. */
 const http = axios.create({ timeout: 15000 });
 
-/**
- * GET wrapper with retry + exponential backoff for 429 / 5xx responses.
- * YouTube's search endpoint is rate-limited per-second AND per-day; backing
- * off instead of failing instantly is what makes this server feel "stable".
- */
-async function ytGet(url, params, retries = 4) {
+async function ytGet(url, params, retries = 3) {
     let lastError;
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
@@ -51,19 +39,17 @@ async function ytGet(url, params, retries = 4) {
             const status = err.response?.status;
             const retryable = status === 429 || (status >= 500 && status < 600) || err.code === 'ECONNABORTED';
             if (!retryable || attempt === retries) break;
-            // Respect Retry-After if YouTube sends it, otherwise back off exponentially
+            
             const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '0', 10);
-            const waitMs = retryAfter > 0 ? retryAfter * 1000 : Math.min(2000 * 2 ** attempt, 16000);
+            const waitMs = retryAfter > 0 ? retryAfter * 1000 : Math.min(2000 * 2 ** attempt, 10000);
             await new Promise(r => setTimeout(r, waitMs));
         }
     }
     throw lastError;
 }
 
-/** Fetch full snippet+statistics for up to N video ids, batched in chunks of 50. */
 async function getVideoDetails(videoIds) {
     const details = {};
-    // YouTube's videos endpoint accepts max 50 ids per call
     for (let i = 0; i < videoIds.length; i += 50) {
         const chunk = videoIds.slice(i, i + 50);
         const data = await ytGet(`${BASE_URL}/videos`, {
@@ -100,9 +86,10 @@ app.get('/top-music-videos', async (req, res) => {
         });
     }
 
-    // Serve from cache when fresh
+    // 1. Check Cache First (Costs 0 Quota)
     const cached = cache[year];
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+        console.log(`Serving ${year} from cache!`);
         return res.json({ ...cached.data, cached: true });
     }
 
@@ -110,51 +97,43 @@ app.get('/top-music-videos', async (req, res) => {
         const seen = new Set();
         const candidates = [];
 
-        // Spread a few focused queries with a polite delay between calls to
-        // stay under the per-second rate limit instead of hammering the API.
-        const PAGES_PER_QUERY = 3; // 50/page => up to 150 per query
-        for (const query of SEARCH_QUERIES) {
-            let pageToken = '';
-            for (let page = 0; page < PAGES_PER_QUERY; page++) {
-                const data = await ytGet(`${BASE_URL}/search`, {
-                    key: API_KEY,
-                    part: 'snippet',
-                    q: query,
-                    type: 'video',
-                    maxResults: 50,
-                    videoCategoryId: 10, // Music
-                    order: 'viewCount',
-                    publishedAfter: `${year}-01-01T00:00:00Z`,
-                    publishedBefore: `${year}-12-31T23:59:59Z`,
-                    pageToken,
-                });
+        // OPTIMIZATION: Only use 1 broad query and 2 pages maximum.
+        // This drops the quota cost from ~1,200 to ~200 per year.
+        let pageToken = '';
+        for (let page = 0; page < 2; page++) {
+            const data = await ytGet(`${BASE_URL}/search`, {
+                key: API_KEY,
+                part: 'snippet',
+                q: 'official music video',
+                type: 'video',
+                maxResults: 50,
+                videoCategoryId: 10, // Music
+                order: 'viewCount',
+                publishedAfter: `${year}-01-01T00:00:00Z`,
+                publishedBefore: `${year}-12-31T23:59:59Z`,
+                pageToken,
+            });
 
-                for (const item of data.items || []) {
-                    const id = item.id?.videoId;
-                    if (id && !seen.has(id)) {
-                        seen.add(id);
-                        candidates.push(id);
-                    }
+            for (const item of data.items || []) {
+                const id = item.id?.videoId;
+                if (id && !seen.has(id)) {
+                    seen.add(id);
+                    candidates.push(id);
                 }
-
-                pageToken = data.nextPageToken;
-                if (!pageToken) break;
-                await sleep(300); // be polite between page requests
             }
+
+            pageToken = data.nextPageToken;
+            if (!pageToken) break;
             await sleep(300);
-            // Early exit: we already have far more than we need
-            if (candidates.length >= 400) break; // extra margin; year filter discards out-of-range hits
         }
 
         if (candidates.length === 0) {
             return res.json({ year, total: 0, videos: [] });
         }
 
+        // Fetch precise view counts and dates
         const details = await getVideoDetails(candidates);
 
-        // YouTube's search date filter is LOOSE (documented quirk): when
-        // ordering by viewCount it returns videos uploaded outside the
-        // requested range. So we filter by the video's REAL upload date here.
         const videos = Object.entries(details)
             .map(([videoId, v]) => ({
                 videoId,
@@ -169,7 +148,10 @@ app.get('/top-music-videos', async (req, res) => {
             .map((v, i) => ({ rank: i + 1, ...v }));
 
         const payload = { year, total: videos.length, videos };
+        
+        // 2. Save to Cache for future requests
         cache[year] = { data: payload, timestamp: Date.now() };
+        
         res.json(payload);
     } catch (error) {
         const status = error.response?.status;
@@ -186,5 +168,5 @@ app.get('/top-music-videos', async (req, res) => {
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
